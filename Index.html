@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>رزا</title>
+<style>
+:root{--bg:#faf7f5;--fg:#2a2224;--mut:#7d6f73;--card:#fff;--ac:#c2456b;--bd:#eadfe2;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1618;--fg:#f4eceb;--mut:#a8999d;--card:#261f22;--ac:#e0698d;--bd:#3a2f33}}
+:root[data-theme="dark"]{--bg:#1b1618;--fg:#f4eceb;--mut:#a8999d;--card:#261f22;--ac:#e0698d;--bd:#3a2f33}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font-family:Vazirmatn,Tahoma,system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;padding:16px;gap:14px}
+h1{margin:0;font-size:26px;color:var(--ac)}
+#st{color:var(--mut);font-size:14px;min-height:20px;text-align:center}
+#av{width:132px;height:132px;border-radius:50%;object-fit:cover;object-position:50% 35%;border:3px solid var(--ac);flex:none;transition:border-color .3s}
+#av.on{animation:p 1.8s infinite}
+#av.hot{border-color:#2e9e6b;animation:p .8s infinite}
+#orb{padding:10px 30px;border-radius:999px;border:0;background:var(--ac);color:#fff;font:inherit;cursor:pointer;flex:none}
+@keyframes p{50%{transform:scale(1.08);box-shadow:0 0 0 14px color-mix(in srgb,var(--ac) 20%,transparent)}}
+#log{flex:1;width:100%;max-width:560px;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
+.m{padding:10px 14px;border-radius:14px;max-width:88%;line-height:1.7;font-size:15px;border:1px solid var(--bd);background:var(--card)}
+.u{align-self:flex-start;background:var(--ac);color:#fff;border-color:transparent}
+.r{align-self:flex-end}
+form{display:flex;gap:8px;width:100%;max-width:560px}
+input{flex:1;padding:12px;border-radius:12px;border:1px solid var(--bd);background:var(--card);color:var(--fg);font:inherit;min-width:0}
+.s{padding:0 16px;border-radius:12px;border:0;background:var(--ac);color:#fff;font:inherit}
+</style>
+</head>
+<body>
+<img id="av" alt="رزا" src="avatar.jpg">
+<h1>رزا</h1>
+<div id="st">دکمه را بزن، بعد بگو «سلام رزا»</div>
+<button id="orb" type="button">شروع</button>
+<div id="log"></div>
+<form id="f"><input id="t" placeholder="یا اینجا بنویس…" autocomplete="off"><button class="s" type="submit">ارسال</button></form>
+<script>
+const $=id=>document.getElementById(id);
+const st=$('st'),orb=$('orb'),log=$('log'),av=$('av');
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+const WAKE=/سلام\s*(رزا|روزا|رضا|رضاء|رزه)/;
+const MODEL='gemini-2.5-flash';
+const GREET='سلام، روزت بخیر!';
+let rec=null,active=false,mode='wake',busy=false,hist=[];
+function add(c,t){const d=document.createElement('div');d.className='m '+c;d.textContent=t;log.appendChild(d);log.scrollTop=log.scrollHeight;return d}
+function setS(t,hot){st.textContent=t;av.classList.toggle('hot',!!hot)}
+function norm(s){return s.replace(/[يى]/g,'ی').replace(/ك/g,'ک').replace(/[\u064B-\u065F]/g,'')}
+function startRec(){
+  if(!SR||!active||busy)return;
+  rec=new SR();rec.lang='fa-IR';rec.continuous=true;rec.interimResults=false;
+  rec.onresult=e=>{
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      if(!e.results[i].isFinal)continue;
+      const raw=e.results[i][0].transcript.trim(),s=norm(raw);
+      if(mode==='wake'){
+        const m=s.match(WAKE);
+        if(!m)continue;
+        const rest=s.slice(m.index+m[0].length).replace(/^[\s،,.]+/,'');
+        if(rest.length>2){ask(rest)}else{mode='cmd';busy=true;stopRec();add('r',GREET);speak(GREET)}
+      }else if(raw){ask(raw)}
+    }
+  };
+  rec.onerror=e=>{
+    if(e.error==='not-allowed'||e.error==='service-not-allowed'){active=false;av.classList.remove('on');orb.textContent='شروع';setS('دسترسی میکروفون داده نشد. در تنظیمات مرورگر (Site settings) اجازه بده و رفرش کن.')}
+  };
+  rec.onend=()=>{if(active&&!busy)setTimeout(startRec,250)};
+  try{rec.start()}catch(_){}
+}
+function stopRec(){try{rec&&rec.abort()}catch(_){}}
+function getKey(){let k='';try{k=localStorage.getItem('rosa_gkey')||''}catch(_){}
+  if(!k){k=(prompt('کلید Gemini خودت را وارد کن (فقط روی همین دستگاه ذخیره می‌شود):')||'').trim();if(k){try{localStorage.setItem('rosa_gkey',k)}catch(_){}}}
+  return k}
+async function ask(q){
+  busy=true;stopRec();mode='wake';
+  add('u',q);setS('رزا در حال فکر کردن…');
+  let ans;
+  try{
+    const sys='تو «رزا» هستی، یک دستیار صوتی فارسی‌زبان، صمیمی و مفید. کوتاه جواب بده (حداکثر سه جمله)، محاوره‌ای و بدون مارک‌داون و فهرست، چون جواب با صدا خوانده می‌شود.';
+    const key=getKey();if(!key)throw {status:0};
+    const contents=hist.slice(-8).map(m=>({role:m.role==='assistant'?'model':'user',parts:[{text:m.content}]})).concat([{role:'user',parts:[{text:q}]}]);
+    const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+MODEL+':generateContent',{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents,generationConfig:{maxOutputTokens:400,thinkingConfig:{thinkingBudget:0}}})});
+    if(!res.ok)throw {status:res.status};
+    const data=await res.json();
+    ans=((data.candidates&&data.candidates[0]&&data.candidates[0].content&&data.candidates[0].content.parts)||[]).map(p=>p.text||'').join('').trim();
+    if(!ans)throw {status:-1};
+    hist.push({role:'user',content:q},{role:'assistant',content:ans});
+  }catch(e){
+    if(e&&(e.status===400||e.status===401||e.status===403)){try{localStorage.removeItem('rosa_gkey')}catch(_){}}
+    ans=e&&[400,401,403].includes(e.status)?'کلید Gemini درست نیست؛ صفحه را رفرش کن و دوباره وارد کن.':e&&e.status===0?'بدون کلید نمی‌توانم جواب بدهم.':e&&e.status===429?'تعداد درخواست‌ها به سقف رایگان رسید؛ چند لحظه بعد دوباره امتحان کن.':'یه مشکلی پیش اومد، دوباره امتحان کن.';
+  }
+  add('r',ans);speak(ans);
+}
+function done(){busy=false;if(active&&mode==='cmd'){setS('بفرمایید، می‌شنوم…',true);setTimeout(()=>{if(mode==='cmd'&&!busy){mode='wake';setS('منتظرم بگی «سلام رزا»')}},12000)}else setS(active?'منتظرم بگی «سلام رزا»':'متوقف شد');if(active)startRec()}
+function speak(t){
+  setS('رزا صحبت می‌کند…');
+  if(!window.speechSynthesis){done();return}
+  const u=new SpeechSynthesisUtterance(t);u.lang='fa-IR';
+  const v=speechSynthesis.getVoices().find(v=>v.lang&&v.lang.startsWith('fa'));if(v)u.voice=v;
+  u.onend=u.onerror=done;
+  speechSynthesis.cancel();speechSynthesis.speak(u);
+}
+orb.onclick=()=>{
+  if(!SR){setS('این مرورگر تشخیص گفتار ندارد؛ از Chrome یا Safari استفاده کن یا بنویس.');return}
+  active=!active;av.classList.toggle('on',active);orb.textContent=active?'توقف':'شروع';
+  if(active){mode='wake';setS('منتظرم بگی «سلام رزا»');startRec()}else{stopRec();speechSynthesis&&speechSynthesis.cancel();setS('متوقف شد');busy=false}
+};
+$('f').onsubmit=e=>{e.preventDefault();const v=$('t').value.trim();if(v&&!busy){$('t').value='';ask(v)}};
+if(window.speechSynthesis)speechSynthesis.getVoices();
+</script>
+</body>
+</html>
