@@ -39,7 +39,6 @@ const $=id=>document.getElementById(id);
 const st=$('st'),orb=$('orb'),log=$('log'),av=$('av');
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
 const WAKE=/سلام\s*(رزا|روزا|رضا|رضاء|رزه)/;
-const MODEL='gemini-2.5-flash';
 const GREET='سلام، روزت بخیر!';
 let rec=null,active=false,mode='wake',busy=false,hist=[];
 function add(c,t){const d=document.createElement('div');d.className='m '+c;d.textContent=t;log.appendChild(d);log.scrollTop=log.scrollHeight;return d}
@@ -67,9 +66,25 @@ function startRec(){
   try{rec.start()}catch(_){}
 }
 function stopRec(){try{rec&&rec.abort()}catch(_){}}
-function getKey(){let k='';try{k=localStorage.getItem('rosa_gkey')||''}catch(_){}
-  if(!k){k=(prompt('کلید Gemini خودت را وارد کن (فقط روی همین دستگاه ذخیره می‌شود):')||'').trim();if(k){try{localStorage.setItem('rosa_gkey',k)}catch(_){}}}
+function getKey(){let k='';try{k=localStorage.getItem('rosa_orkey')||''}catch(_){}
+  if(!k){k=(prompt('کلید OpenRouter خودت را وارد کن (فقط روی همین دستگاه ذخیره می‌شود):')||'').trim();if(k){try{localStorage.setItem('rosa_orkey',k)}catch(_){}}}
   return k}
+async function getModels(){
+  let ids=[];
+  try{ids=JSON.parse(localStorage.getItem('rosa_models')||'[]')}catch(_){}
+  if(!ids.length){
+    try{
+      const d=await (await fetch('https://openrouter.ai/api/v1/models')).json();
+      const tx=a=>(a||['text']).includes('text');
+      const free=d.data.filter(m=>m.id.endsWith(':free')&&m.architecture&&tx(m.architecture.input_modalities)&&tx(m.architecture.output_modalities));
+      const pref=/llama|gemma|qwen|mistral|gpt-oss|deepseek|nemotron|glm/i;
+      free.sort((a,b)=>(pref.test(b.id)-pref.test(a.id))||((b.context_length||0)-(a.context_length||0)));
+      ids=free.slice(0,6).map(m=>m.id);
+      try{localStorage.setItem('rosa_models',JSON.stringify(ids))}catch(_){}
+    }catch(_){}
+  }
+  return ids.length?ids:['openrouter/free'];
+}
 async function ask(q){
   busy=true;stopRec();mode='wake';
   add('u',q);setS('رزا در حال فکر کردن…');
@@ -77,16 +92,25 @@ async function ask(q){
   try{
     const sys='تو «رزا» هستی، یک دستیار صوتی فارسی‌زبان، صمیمی و مفید. کوتاه جواب بده (حداکثر سه جمله)، محاوره‌ای و بدون مارک‌داون و فهرست، چون جواب با صدا خوانده می‌شود.';
     const key=getKey();if(!key)throw {status:0};
-    const contents=hist.slice(-8).map(m=>({role:m.role==='assistant'?'model':'user',parts:[{text:m.content}]})).concat([{role:'user',parts:[{text:q}]}]);
-    const res=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+MODEL+':generateContent',{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents,generationConfig:{maxOutputTokens:400,thinkingConfig:{thinkingBudget:0}}})});
-    if(!res.ok)throw {status:res.status};
-    const data=await res.json();
-    ans=((data.candidates&&data.candidates[0]&&data.candidates[0].content&&data.candidates[0].content.parts)||[]).map(p=>p.text||'').join('').trim();
-    if(!ans)throw {status:-1};
+    const msgs=[{role:'system',content:sys}].concat(hist.slice(-8),[{role:'user',content:q}]);
+    const models=await getModels();
+    let last=0,ok=null;
+    for(const m of models){
+      try{
+        const res=await fetch('https://openrouter.ai/api/v1/chat/completions',{method:'POST',headers:{'content-type':'application/json','authorization':'Bearer '+key},body:JSON.stringify({model:m,messages:msgs,max_tokens:400})});
+        if(res.status===401)throw {status:401};
+        if(!res.ok){last=res.status;continue}
+        const data=await res.json();
+        const c=data.choices&&data.choices[0]&&data.choices[0].message&&data.choices[0].message.content;
+        if(c&&c.trim()){ok=c.trim();break}
+      }catch(err){if(err&&err.status===401)throw err;last=-1}
+    }
+    if(!ok){try{localStorage.removeItem('rosa_models')}catch(_){}throw {status:last||-1}}
+    ans=ok.replace(/<think>[\s\S]*?<\/think>/g,'').trim()||ok;
     hist.push({role:'user',content:q},{role:'assistant',content:ans});
   }catch(e){
-    if(e&&(e.status===400||e.status===401||e.status===403)){try{localStorage.removeItem('rosa_gkey')}catch(_){}}
-    ans=e&&[400,401,403].includes(e.status)?'کلید Gemini درست نیست؛ صفحه را رفرش کن و دوباره وارد کن.':e&&e.status===0?'بدون کلید نمی‌توانم جواب بدهم.':e&&e.status===429?'تعداد درخواست‌ها به سقف رایگان رسید؛ چند لحظه بعد دوباره امتحان کن.':'یه مشکلی پیش اومد، دوباره امتحان کن.';
+    if(e&&e.status===401){try{localStorage.removeItem('rosa_orkey')}catch(_){}}
+    ans=e&&e.status===401?'کلید OpenRouter درست نیست؛ صفحه را رفرش کن و دوباره وارد کن.':e&&e.status===0?'بدون کلید نمی‌توانم جواب بدهم.':e&&e.status===429?'سقف رایگان امروز یا این دقیقه تمام شد؛ کمی بعد دوباره امتحان کن.':'یه مشکلی پیش اومد، دوباره امتحان کن.';
   }
   add('r',ans);speak(ans);
 }
@@ -106,6 +130,7 @@ orb.onclick=()=>{
 };
 $('f').onsubmit=e=>{e.preventDefault();const v=$('t').value.trim();if(v&&!busy){$('t').value='';ask(v)}};
 if(window.speechSynthesis)speechSynthesis.getVoices();
+fetch('https://api.github.com/repos/raminasgharzadeh-dotcom/Rosa/contents/').then(r=>r.json()).then(fs=>{const f=fs.find(x=>/\.(jpe?g|png|webp)$/i.test(x.name));if(f)av.src=f.download_url}).catch(()=>{});
 </script>
 </body>
 </html>
